@@ -678,7 +678,12 @@
                 showView('app');
                 refreshLeaderboard();
             } catch (err) {
-                alert("认证失败: " + err.message);
+                console.error("Auth Error:", err);
+                let msg = err.message;
+                if (msg.includes("Database error saving new user")) {
+                    msg += "\n\n提示：请确保您已在 Supabase SQL Editor 中执行了建表脚本。如果表不存在，注册会失败。";
+                }
+                alert("认证失败: " + msg);
             }
         });
 
