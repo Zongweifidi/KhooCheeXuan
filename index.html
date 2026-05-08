@@ -1,13 +1,1094 @@
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>My Google AI Studio App</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>番茄英雄 - 游戏化番茄钟</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        :root {
+            --primary-color: #E53935;
+            --secondary-color: #43A047;
+            --bg-color: #121212;
+            --card-bg: #1E1E1E;
+            --text-color: #E0E0E0;
+            --text-dim: #B0B0B0;
+        }
 
+        * {
+            box-sizing: border-box;
+            margin: 0;
+            padding: 0;
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            overflow-x: hidden;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 500px;
+            padding: 20px;
+        }
+
+        /* Views */
+        .view {
+            display: none;
+            animation: fadeIn 0.5s ease-out;
+        }
+
+        .view.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* Auth Form */
+        .auth-card {
+            background: var(--card-bg);
+            padding: 30px;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+
+        .auth-card h2 {
+            margin-bottom: 20px;
+            text-align: center;
+            color: var(--primary-color);
+        }
+
+        .input-group {
+            margin-bottom: 15px;
+        }
+
+        .input-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-size: 14px;
+            color: var(--text-dim);
+        }
+
+        .input-group input {
+            width: 100%;
+            padding: 12px;
+            background: #2C2C2C;
+            border: 1px solid #444;
+            border-radius: 8px;
+            color: white;
+            outline: none;
+        }
+
+        .input-group input:focus {
+            border-color: var(--primary-color);
+        }
+
+        .btn {
+            width: 100%;
+            padding: 12px;
+            border: none;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: bold;
+            transition: 0.3s;
+            margin-top: 10px;
+        }
+
+        .btn-primary {
+            background: var(--primary-color);
+            color: white;
+        }
+
+        .btn-primary:hover {
+            background: #C62828;
+        }
+
+        .btn-outline {
+            background: transparent;
+            border: 1px solid var(--primary-color);
+            color: var(--primary-color);
+        }
+
+        .toggle-auth {
+            text-align: center;
+            margin-top: 15px;
+            font-size: 14px;
+            color: var(--text-dim);
+            cursor: pointer;
+        }
+
+        /* Main App Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        .profile-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .avatar {
+            width: 40px;
+            height: 40px;
+            background: var(--primary-color);
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-weight: bold;
+            font-size: 20px;
+        }
+
+        .user-stats div {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .user-stats .username {
+            font-size: 16px;
+            font-weight: bold;
+            color: white;
+        }
+
+        /* Timer Section */
+        .timer-card {
+            background: var(--card-bg);
+            padding: 40px 20px;
+            border-radius: 20px;
+            text-align: center;
+            position: relative;
+            margin-bottom: 20px;
+        }
+
+        .timer-display {
+            position: relative;
+            width: 250px;
+            height: 250px;
+            margin: 0 auto 30px;
+        }
+
+        .timer-svg {
+            transform: rotate(-90deg);
+        }
+
+        .timer-bg {
+            fill: none;
+            stroke: #333;
+            stroke-width: 8;
+        }
+
+        .timer-progress {
+            fill: none;
+            stroke: var(--primary-color);
+            stroke-width: 8;
+            stroke-linecap: round;
+            transition: stroke-dashoffset 0.3s linear, stroke 0.5s;
+        }
+
+        .timer-text {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 48px;
+            font-weight: bold;
+        }
+
+        .timer-mode {
+            font-size: 18px;
+            color: var(--text-dim);
+            margin-bottom: 10px;
+            font-weight: 500;
+        }
+
+        .timer-controls {
+            display: flex;
+            justify-content: center;
+            gap: 15px;
+        }
+
+        .btn-icon {
+            width: 60px;
+            height: 60px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            border: none;
+            cursor: pointer;
+            font-size: 24px;
+            color: white;
+        }
+
+        /* Stats & Level */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-bottom: 20px;
+        }
+
+        .stat-item {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 20px;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .stat-label {
+            font-size: 12px;
+            color: var(--text-dim);
+        }
+
+        .exp-bar-container {
+            background: var(--card-bg);
+            padding: 15px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+
+        .exp-info {
+            display: flex;
+            justify-content: space-between;
+            font-size: 14px;
+            margin-bottom: 8px;
+        }
+
+        .exp-bar {
+            height: 8px;
+            background: #333;
+            border-radius: 4px;
+            overflow: hidden;
+        }
+
+        .exp-progress {
+            height: 100%;
+            background: linear-gradient(90deg, var(--primary-color), #FF7043);
+            width: 0%;
+            transition: width 0.5s ease-out;
+        }
+
+        /* Leaderboard */
+        .leaderboard-card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 16px;
+        }
+
+        .leaderboard-card h3 {
+            margin-bottom: 15px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .leaderboard-list {
+            list-style: none;
+        }
+
+        .leaderboard-item {
+            display: flex;
+            align-items: center;
+            padding: 12px 0;
+            border-bottom: 1px solid #333;
+        }
+
+        .leaderboard-rank {
+            width: 30px;
+            font-weight: bold;
+            color: var(--primary-color);
+        }
+
+        .leaderboard-info {
+            flex-grow: 1;
+        }
+
+        .leaderboard-name {
+            font-weight: bold;
+        }
+
+        .leaderboard-title {
+            font-size: 10px;
+            color: var(--text-dim);
+        }
+
+        .leaderboard-count {
+            text-align: right;
+        }
+
+        /* Achievement Toast */
+        .achievement-toast {
+            position: fixed;
+            bottom: 20px;
+            right: -350px;
+            background: #333;
+            color: white;
+            padding: 15px 20px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+            transition: right 0.6s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+            z-index: 1000;
+            border-left: 4px solid #FFD700;
+            min-width: 250px;
+        }
+
+        .achievement-toast.show {
+            right: 20px;
+        }
+
+        .achievement-icon {
+            font-size: 30px;
+        }
+
+        /* Level Up Overlay */
+        #level-up-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 2000;
+            flex-direction: column;
+        }
+
+        .level-up-content {
+            text-align: center;
+            animation: levelUpPop 0.8s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+        }
+
+        @keyframes levelUpPop {
+            0% { transform: scale(0.5); opacity: 0; }
+            100% { transform: scale(1); opacity: 1; }
+        }
+
+        .flash {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: white;
+            opacity: 0;
+            pointer-events: none;
+            z-index: 2001;
+        }
+
+        .flash.active {
+            animation: flashAnim 0.5s ease-out;
+        }
+
+        @keyframes flashAnim {
+            0% { opacity: 1; }
+            100% { opacity: 0; }
+        }
+
+        /* Floating EXP */
+        .floating-exp {
+            position: fixed;
+            color: #FFD700;
+            font-weight: bold;
+            font-size: 28px;
+            pointer-events: none;
+            animation: floatUp 1.5s forwards;
+            z-index: 1500;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.5);
+        }
+
+        @keyframes floatUp {
+            0% { transform: translateY(0) scale(1); opacity: 1; }
+            100% { transform: translateY(-120px) scale(1.5); opacity: 0; }
+        }
+
+        /* Particles */
+        .particle {
+            position: fixed;
+            width: 6px;
+            height: 6px;
+            border-radius: 50%;
+            pointer-events: none;
+            z-index: 1400;
+        }
+
+        /* Misc */
+        .hidden { display: none !important; }
+        .logout-btn {
+            font-size: 12px;
+            color: var(--text-dim);
+            background: none;
+            border: 1px solid #444;
+            padding: 4px 8px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .logout-btn:hover {
+            border-color: var(--primary-color);
+            color: var(--primary-color);
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <!-- Auth View -->
+        <div id="auth-view" class="view active">
+            <div class="auth-card">
+                <h2 id="auth-title">登录番茄英雄</h2>
+                <div class="input-group" id="username-group" style="display: none;">
+                    <label>用户名</label>
+                    <input type="text" id="auth-username" placeholder="输入您的英雄名">
+                </div>
+                <div class="input-group">
+                    <label>邮箱</label>
+                    <input type="email" id="auth-email" placeholder="example@mail.com">
+                </div>
+                <div class="input-group">
+                    <label>密码</label>
+                    <input type="password" id="auth-password" placeholder="••••••••">
+                </div>
+                <button class="btn btn-primary" id="auth-submit">登录</button>
+                <div class="toggle-auth" id="auth-toggle">没有账号？立即注册</div>
+            </div>
+        </div>
+
+        <!-- App View -->
+        <div id="app-view" class="view">
+            <header class="header">
+                <div class="profile-info">
+                    <div class="avatar" id="user-avatar">?</div>
+                    <div class="user-stats">
+                        <div class="username" id="display-username">Hero</div>
+                        <div id="display-title">新手学徒</div>
+                    </div>
+                </div>
+                <button class="logout-btn" id="logout-btn">登出</button>
+            </header>
+
+            <div class="timer-card">
+                <div class="timer-mode" id="timer-mode">专注中</div>
+                <div class="timer-display" id="timer-container">
+                    <svg class="timer-svg" width="250" height="250">
+                        <circle class="timer-bg" cx="125" cy="125" r="110"></circle>
+                        <circle class="timer-progress" cx="125" cy="125" r="110"
+                                stroke-dasharray="691.15" stroke-dashoffset="0"></circle>
+                    </svg>
+                    <div class="timer-text" id="timer-text">25:00</div>
+                </div>
+                <div class="timer-controls">
+                    <button class="btn-icon btn-primary" id="timer-start">▶</button>
+                    <button class="btn-icon btn-outline" id="timer-stop">■</button>
+                </div>
+            </div>
+
+            <div class="exp-bar-container">
+                <div class="exp-info">
+                    <span>等级 <span id="display-level">1</span></span>
+                    <span><span id="display-exp">0</span> / <span id="display-next-exp">300</span> EXP</span>
+                </div>
+                <div class="exp-bar">
+                    <div class="exp-progress" id="exp-progress-bar"></div>
+                </div>
+            </div>
+
+            <div class="stats-grid">
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-total">0</div>
+                    <div class="stat-label">累计番茄</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-value" id="stat-streak">0</div>
+                    <div class="stat-label">当前连击</div>
+                </div>
+            </div>
+
+            <div class="leaderboard-card">
+                <h3>
+                    排行榜
+                    <span style="font-size: 12px; font-weight: normal; color: var(--text-dim);">Top 10</span>
+                </h3>
+                <ul class="leaderboard-list" id="leaderboard-list">
+                    <!-- Leaderboard items will be injected here -->
+                </ul>
+            </div>
+        </div>
+    </div>
+
+    <!-- Achievement Toast -->
+    <div id="achievement-toast" class="achievement-toast">
+        <div class="achievement-icon">🏆</div>
+        <div>
+            <div style="font-weight: bold;">解锁成就！</div>
+            <div id="achievement-name" style="font-size: 14px; color: var(--text-dim);">第一个番茄</div>
+        </div>
+    </div>
+
+    <!-- Level Up Overlay -->
+    <div id="level-up-overlay">
+        <div class="flash" id="flash-effect"></div>
+        <div class="level-up-content">
+            <h1 style="color: #FFD700; font-size: 64px; text-shadow: 0 0 20px rgba(255,215,0,0.5);">LEVEL UP!</h1>
+            <p id="new-title-display" style="font-size: 24px; color: white; margin-top: 10px;">获得称号：专注骑士</p>
+            <button class="btn btn-primary" style="width: auto; padding: 10px 30px; margin-top: 30px;" onclick="document.getElementById('level-up-overlay').style.display='none'">继续英雄之路</button>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * ⚠️ 配置说明：
+         * 请在此处填写您的 Supabase 项目凭据
+         */
+        const SUPABASE_URL = 'YOUR_SUPABASE_URL';
+        const SUPABASE_ANON_KEY = 'YOUR_ANON_KEY';
+
+        const { createClient } = supabase;
+        const db = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // --- 状态管理 ---
+        let user = null;
+        let profile = {
+            id: null,
+            username: '',
+            level: 1,
+            exp: 0,
+            total_tomatoes: 0,
+            max_streak: 0
+        };
+        let sessions = [];
+        let achievements = new Set();
+
+        let timer = {
+            minutes: 25,
+            seconds: 0,
+            totalSeconds: 25 * 60,
+            remainingSeconds: 25 * 60,
+            interval: null,
+            mode: 'work', // 'work', 'shortBreak', 'longBreak'
+            isRunning: false,
+            workCount: 0,
+            streak: 0
+        };
+
+        const ACHIEVEMENTS_MAP = {
+            'first_tomato': '初试身手 (完成第1个番茄)',
+            'on_fire': '手感火热 (连续3个不中断)',
+            'daily_hero': '今日英雄 (单日完成8个番茄)',
+            'dragon_slayer': '巨龙猎手 (累计完成50个番茄)',
+            'night_owl': '暗夜之眼 (23:00后完成番茄)',
+            'perfectionist': '完美主义 (连续7天每天≥4个)'
+        };
+
+        // --- DOM 元素 ---
+        const authView = document.getElementById('auth-view');
+        const appView = document.getElementById('app-view');
+        const timerText = document.getElementById('timer-text');
+        const timerProgress = document.querySelector('.timer-progress');
+        const timerModeLabel = document.getElementById('timer-mode');
+        const startBtn = document.getElementById('timer-start');
+        const stopBtn = document.getElementById('timer-stop');
+        const logoutBtn = document.getElementById('logout-btn');
+
+        // --- 初始化 ---
+        async function init() {
+            const { data: { session } } = await db.auth.getSession();
+            if (session) {
+                user = session.user;
+                await syncLocalStorage();
+                await loadUserData();
+                showView('app');
+            } else {
+                loadLocalData(); // Load guest data
+                showView('auth');
+            }
+            updateUI();
+            refreshLeaderboard();
+        }
+
+        function showView(viewName) {
+            authView.classList.remove('active');
+            appView.classList.remove('active');
+            if (viewName === 'auth') authView.classList.add('active');
+            else appView.classList.add('active');
+        }
+
+        // --- 认证逻辑 ---
+        const authTitle = document.getElementById('auth-title');
+        const authSubmit = document.getElementById('auth-submit');
+        const authToggle = document.getElementById('auth-toggle');
+        const usernameGroup = document.getElementById('username-group');
+        let isLogin = true;
+
+        authToggle.addEventListener('click', () => {
+            isLogin = !isLogin;
+            authTitle.innerText = isLogin ? '登录番茄英雄' : '注册英雄账号';
+            authSubmit.innerText = isLogin ? '登录' : '注册';
+            authToggle.innerText = isLogin ? '没有账号？立即注册' : '已有账号？去登录';
+            usernameGroup.style.display = isLogin ? 'none' : 'block';
+        });
+
+        authSubmit.addEventListener('click', async () => {
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const username = document.getElementById('auth-username').value;
+
+            if (!email || !password) return alert("请填写邮箱和密码");
+
+            try {
+                if (isLogin) {
+                    const { data, error } = await db.auth.signInWithPassword({ email, password });
+                    if (error) throw error;
+                    user = data.user;
+                } else {
+                    const { data, error } = await db.auth.signUp({
+                        email,
+                        password,
+                        options: { data: { username: username || email.split('@')[0] } }
+                    });
+                    if (error) throw error;
+                    user = data.user;
+                    if (!data.session) return alert("注册成功，请查收确认邮件后再登录（若已开启邮件验证）");
+                }
+
+                await syncLocalStorage();
+                await loadUserData();
+                showView('app');
+                refreshLeaderboard();
+            } catch (err) {
+                alert("认证失败: " + err.message);
+            }
+        });
+
+        logoutBtn.addEventListener('click', async () => {
+            await db.auth.signOut();
+            user = null;
+            resetState();
+            showView('auth');
+        });
+
+        function resetState() {
+            profile = { id: null, username: '', level: 1, exp: 0, total_tomatoes: 0, max_streak: 0 };
+            sessions = [];
+            achievements = new Set();
+            resetTimer();
+        }
+
+        // --- 数据加载与同步 ---
+        function loadLocalData() {
+            const localProf = JSON.parse(localStorage.getItem('temp_profile') || '{}');
+            if (localProf.total_tomatoes) {
+                profile.exp = localProf.exp || 0;
+                profile.total_tomatoes = localProf.total_tomatoes || 0;
+                profile.level = calculateLevelFromExp(profile.exp);
+            }
+            const localSess = JSON.parse(localStorage.getItem('temp_sessions') || '[]');
+            sessions = localSess;
+            const localAch = JSON.parse(localStorage.getItem('temp_achievements') || '[]');
+            achievements = new Set(localAch);
+        }
+
+        async function loadUserData() {
+            if (!user) return;
+
+            // Profile
+            let { data: profData } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
+
+            if (!profData) {
+                // Initial profile creation if trigger didn't do it
+                const newProfile = {
+                    id: user.id,
+                    username: user.user_metadata.username || user.email.split('@')[0],
+                    level: 1,
+                    exp: 0,
+                    total_tomatoes: 0
+                };
+                const { data, error } = await db.from('profiles').insert(newProfile).select().single();
+                if (!error) profData = data;
+                else profData = newProfile;
+            }
+
+            if (profData) profile = profData;
+
+            // Sessions
+            const { data: sessData } = await db.from('tomato_sessions').select('*').eq('user_id', user.id);
+            if (sessData) sessions = sessData;
+
+            // Achievements
+            const { data: achData } = await db.from('achievements').select('achievement_key').eq('user_id', user.id);
+            if (achData) achievements = new Set(achData.map(a => a.achievement_key));
+
+            updateUI();
+        }
+
+        async function syncLocalStorage() {
+            if (!user) return;
+            const localSessions = JSON.parse(localStorage.getItem('temp_sessions') || '[]');
+            const localProfile = JSON.parse(localStorage.getItem('temp_profile') || '{}');
+            const localAch = JSON.parse(localStorage.getItem('temp_achievements') || '[]');
+
+            let sessionsSynced = true;
+            if (localSessions.length > 0) {
+                const toInsert = localSessions.map(s => ({ ...s, user_id: user.id }));
+                const { error } = await db.from('tomato_sessions').insert(toInsert);
+                if (!error) localStorage.removeItem('temp_sessions');
+                else sessionsSynced = false;
+            }
+
+            if (localProfile.total_tomatoes > 0) {
+                const { data: remote } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
+                const newExp = Math.max((remote ? remote.exp : 0), localProfile.exp || 0);
+                const newTotal = Math.max((remote ? remote.total_tomatoes : 0), localProfile.total_tomatoes || 0);
+                const newLevel = calculateLevelFromExp(newExp);
+
+                const { error } = await db.from('profiles').upsert({
+                    id: user.id,
+                    username: (remote ? remote.username : (user.user_metadata.username || user.email.split('@')[0])),
+                    exp: newExp,
+                    total_tomatoes: newTotal,
+                    level: newLevel,
+                    updated_at: new Date().toISOString()
+                });
+                if (!error) localStorage.removeItem('temp_profile');
+            }
+
+            if (localAch.length > 0) {
+                let allAchSynced = true;
+                for (const key of localAch) {
+                    const { error } = await db.from('achievements').upsert({ user_id: user.id, achievement_key: key });
+                    if (error) allAchSynced = false;
+                }
+                if (allAchSynced) localStorage.removeItem('temp_achievements');
+            }
+        }
+
+        // --- 计时器逻辑 ---
+        function updateTimerDisplay() {
+            const m = Math.floor(timer.remainingSeconds / 60);
+            const s = timer.remainingSeconds % 60;
+            timerText.innerText = `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+
+            const percent = timer.remainingSeconds / timer.totalSeconds;
+            const offset = 691.15 * percent;
+            timerProgress.style.strokeDashoffset = 691.15 - offset;
+
+            if (timer.mode === 'work') {
+                timerProgress.style.stroke = 'var(--primary-color)';
+                timerModeLabel.innerText = '专注中';
+                timerModeLabel.style.color = 'var(--primary-color)';
+            } else {
+                timerProgress.style.stroke = 'var(--secondary-color)';
+                timerModeLabel.innerText = '休息中';
+                timerModeLabel.style.color = 'var(--secondary-color)';
+            }
+        }
+
+        startBtn.addEventListener('click', () => {
+            if (timer.isRunning) return;
+            timer.isRunning = true;
+            startBtn.classList.add('hidden');
+            timer.interval = setInterval(tick, 1000);
+        });
+
+        stopBtn.addEventListener('click', () => {
+            if (timer.mode === 'work' && timer.isRunning && timer.remainingSeconds < timer.totalSeconds) {
+                timer.streak = 0;
+                showNotification("专注中断，连击重置", "var(--primary-color)");
+            }
+            resetTimer();
+        });
+
+        function resetTimer() {
+            clearInterval(timer.interval);
+            timer.isRunning = false;
+            timer.remainingSeconds = timer.totalSeconds;
+            startBtn.classList.remove('hidden');
+            updateTimerDisplay();
+        }
+
+        function tick() {
+            if (timer.remainingSeconds > 0) {
+                timer.remainingSeconds--;
+                updateTimerDisplay();
+            } else {
+                completeSession();
+            }
+        }
+
+        async function completeSession() {
+            clearInterval(timer.interval);
+            timer.isRunning = false;
+            startBtn.classList.remove('hidden');
+
+            if (timer.mode === 'work') {
+                timer.workCount++;
+                timer.streak++;
+                const expGain = 100 + (timer.streak > 1 ? 50 : 0);
+
+                spawnParticles(expGain);
+
+                const sessionRecord = {
+                    duration: Math.floor(timer.totalSeconds / 60),
+                    completed_at: new Date().toISOString(),
+                    interrupted: false
+                };
+
+                if (user) {
+                    sessionRecord.user_id = user.id;
+                    await db.from('tomato_sessions').insert(sessionRecord);
+                    sessions.push(sessionRecord);
+                    await updateProfile(expGain, 1);
+                } else {
+                    let localSess = JSON.parse(localStorage.getItem('temp_sessions') || '[]');
+                    localSess.push(sessionRecord);
+                    localStorage.setItem('temp_sessions', JSON.stringify(localSess));
+
+                    let localProf = JSON.parse(localStorage.getItem('temp_profile') || '{"exp":0, "total_tomatoes":0}');
+                    localProf.exp += expGain;
+                    localProf.total_tomatoes += 1;
+                    localStorage.setItem('temp_profile', JSON.stringify(localProf));
+
+                    profile.exp += expGain;
+                    profile.total_tomatoes += 1;
+                    const oldLevel = profile.level;
+                    profile.level = calculateLevelFromExp(profile.exp);
+                    if (profile.level > oldLevel) showLevelUp();
+                }
+
+                checkAchievements();
+                refreshLeaderboard();
+
+                if (timer.workCount % 4 === 0) setTimerMode('longBreak');
+                else setTimerMode('shortBreak');
+            } else {
+                setTimerMode('work');
+            }
+            updateUI();
+        }
+
+        function setTimerMode(mode) {
+            timer.mode = mode;
+            if (mode === 'work') timer.totalSeconds = 25 * 60;
+            else if (mode === 'shortBreak') timer.totalSeconds = 5 * 60;
+            else if (mode === 'longBreak') timer.totalSeconds = 15 * 60;
+            timer.remainingSeconds = timer.totalSeconds;
+            updateTimerDisplay();
+        }
+
+        // --- 游戏化逻辑 ---
+        function calculateLevelFromExp(exp) {
+            let lvl = 1, req = 300, totalReq = 0;
+            while (exp >= totalReq + req) {
+                totalReq += req;
+                lvl++;
+                req = Math.floor(req * 1.5);
+            }
+            return lvl;
+        }
+
+        function getNextLevelExp(lvl) {
+            let req = 300;
+            for (let i = 1; i < lvl; i++) req = Math.floor(req * 1.5);
+            return req;
+        }
+
+        function getExpInCurrentLevel(exp, lvl) {
+            let totalToPrev = 0, req = 300;
+            for (let i = 1; i < lvl; i++) {
+                totalToPrev += req;
+                req = Math.floor(req * 1.5);
+            }
+            return exp - totalToPrev;
+        }
+
+        function getTitle(lvl) {
+            if (lvl >= 20) return "传说番茄王";
+            if (lvl >= 10) return "时间法师";
+            if (lvl >= 5) return "专注骑士";
+            return "新手学徒";
+        }
+
+        async function updateProfile(expGain, tomatoGain) {
+            const oldLevel = profile.level;
+            profile.exp += expGain;
+            profile.total_tomatoes += tomatoGain;
+            profile.level = calculateLevelFromExp(profile.exp);
+
+            if (user) {
+                await db.from('profiles').upsert({
+                    id: user.id,
+                    username: profile.username,
+                    exp: profile.exp,
+                    total_tomatoes: profile.total_tomatoes,
+                    level: profile.level,
+                    updated_at: new Date().toISOString()
+                });
+            }
+
+            if (profile.level > oldLevel) showLevelUp();
+        }
+
+        async function checkAchievements() {
+            const newAchievements = [];
+            const today = new Date().toLocaleDateString();
+
+            if (!achievements.has('first_tomato') && profile.total_tomatoes >= 1) newAchievements.push('first_tomato');
+            if (!achievements.has('on_fire') && timer.streak >= 3) newAchievements.push('on_fire');
+
+            const todayCount = sessions.filter(s => new Date(s.completed_at).toLocaleDateString() === today).length;
+            if (!achievements.has('daily_hero') && todayCount >= 8) newAchievements.push('daily_hero');
+            if (!achievements.has('dragon_slayer') && profile.total_tomatoes >= 50) newAchievements.push('dragon_slayer');
+
+            const lastSess = sessions[sessions.length - 1];
+            if (lastSess && !achievements.has('night_owl') && new Date(lastSess.completed_at).getHours() >= 23) newAchievements.push('night_owl');
+
+            if (!achievements.has('perfectionist')) {
+                const dayCounts = {};
+                sessions.forEach(s => {
+                    const d = new Date(s.completed_at).toLocaleDateString();
+                    dayCounts[d] = (dayCounts[d] || 0) + 1;
+                });
+                let streak = 0, check = new Date();
+                for (let i = 0; i < 30; i++) {
+                    if (dayCounts[check.toLocaleDateString()] >= 4) streak++;
+                    else if (i > 0) break;
+                    if (streak >= 7) { newAchievements.push('perfectionist'); break; }
+                    check.setDate(check.getDate() - 1);
+                }
+            }
+
+            for (const key of newAchievements) {
+                achievements.add(key);
+                showAchievement(key);
+                if (user) await db.from('achievements').insert({ user_id: user.id, achievement_key: key });
+                else localStorage.setItem('temp_achievements', JSON.stringify([...achievements]));
+            }
+        }
+
+        // --- 视觉反馈 ---
+        function updateUI() {
+            document.getElementById('display-username').innerText = profile.username || (user ? user.email.split('@')[0] : 'Hero');
+            document.getElementById('display-title').innerText = getTitle(profile.level);
+            document.getElementById('user-avatar').innerText = (profile.username || (user ? user.email : 'H')).charAt(0).toUpperCase();
+            document.getElementById('stat-total').innerText = profile.total_tomatoes;
+            document.getElementById('stat-streak').innerText = timer.streak;
+
+            const currentExp = getExpInCurrentLevel(profile.exp, profile.level);
+            const nextExp = getNextLevelExp(profile.level);
+            document.getElementById('display-level').innerText = profile.level;
+            document.getElementById('display-exp').innerText = currentExp;
+            document.getElementById('display-next-exp').innerText = nextExp;
+            document.getElementById('exp-progress-bar').style.width = `${(currentExp / nextExp) * 100}%`;
+
+            updateTimerDisplay();
+        }
+
+        async function refreshLeaderboard() {
+            const { data, error } = await db.from('profiles')
+                .select('username, total_tomatoes, level')
+                .order('total_tomatoes', { ascending: false })
+                .limit(10);
+
+            if (error) return;
+            document.getElementById('leaderboard-list').innerHTML = data.map((item, index) => `
+                <li class="leaderboard-item">
+                    <div class="leaderboard-rank">${index + 1}</div>
+                    <div class="leaderboard-info">
+                        <div class="leaderboard-name">${item.username || '神秘英雄'}</div>
+                        <div class="leaderboard-title">Lv.${item.level} ${getTitle(item.level)}</div>
+                    </div>
+                    <div class="leaderboard-count">
+                        <div style="font-weight: bold; color: var(--primary-color);">${item.total_tomatoes}</div>
+                        <div style="font-size: 10px; color: var(--text-dim);">番茄</div>
+                    </div>
+                </li>
+            `).join('');
+        }
+
+        function showAchievement(key) {
+            const toast = document.getElementById('achievement-toast');
+            document.getElementById('achievement-name').innerText = ACHIEVEMENTS_MAP[key];
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 4000);
+        }
+
+        function showLevelUp() {
+            const overlay = document.getElementById('level-up-overlay');
+            const flash = document.getElementById('flash-effect');
+            document.getElementById('new-title-display').innerText = `获得称号：${getTitle(profile.level)}`;
+            overlay.style.display = 'flex';
+            flash.classList.add('active');
+            setTimeout(() => flash.classList.remove('active'), 500);
+        }
+
+        function spawnParticles(exp) {
+            const container = document.getElementById('timer-container');
+            const rect = container.getBoundingClientRect();
+            const centerX = rect.left + rect.width / 2;
+            const centerY = rect.top + rect.height / 2;
+
+            const float = document.createElement('div');
+            float.className = 'floating-exp';
+            float.innerText = `+${exp} EXP`;
+            float.style.left = `${centerX - 50}px`;
+            float.style.top = `${centerY - 20}px`;
+            document.body.appendChild(float);
+            setTimeout(() => float.remove(), 1500);
+
+            for (let i = 0; i < 30; i++) {
+                const p = document.createElement('div');
+                p.className = 'particle';
+                p.style.backgroundColor = i % 2 === 0 ? 'var(--primary-color)' : '#FFD700';
+                p.style.left = `${centerX}px`;
+                p.style.top = `${centerY}px`;
+                const angle = Math.random() * Math.PI * 2, velocity = 3 + Math.random() * 7;
+                const vx = Math.cos(angle) * velocity, vy = Math.sin(angle) * velocity;
+                document.body.appendChild(p);
+                let opacity = 1, curX = centerX, curY = centerY;
+                const anim = () => {
+                    curX += vx; curY += vy; opacity -= 0.02;
+                    p.style.left = `${curX}px`; p.style.top = `${curY}px`; p.style.opacity = opacity;
+                    if (opacity > 0) requestAnimationFrame(anim); else p.remove();
+                };
+                requestAnimationFrame(anim);
+            }
+        }
+
+        function showNotification(text, color) {
+            const toast = document.getElementById('achievement-toast');
+            const content = toast.innerHTML;
+            toast.innerHTML = `<div class="achievement-icon">⚠️</div><div><div style="font-weight:bold">提醒</div><div style="font-size:14px;color:var(--text-dim)">${text}</div></div>`;
+            toast.style.borderLeftColor = color;
+            toast.classList.add('show');
+            setTimeout(() => {
+                toast.classList.remove('show');
+                setTimeout(() => { toast.innerHTML = content; toast.style.borderLeftColor = '#FFD700'; }, 600);
+            }, 3000);
+        }
+
+        init();
+    </script>
+</body>
+</html>
