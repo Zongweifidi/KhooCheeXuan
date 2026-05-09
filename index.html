@@ -481,11 +481,19 @@
         // Profile (Auto-create if missing)
         let { data: prof } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
         if (!prof) {
-            const initial = { id: user.id, username: user.user_metadata.username || user.email.split('@')[0], level: 1, exp: 0 };
-            const { data } = await db.from('profiles').insert(initial).select().single();
-            prof = data;
+            const metadata = user.user_metadata || {};
+            const initial = {
+                id: user.id,
+                username: metadata.username || user.email.split('@')[0],
+                level: 1,
+                exp: 0,
+                total_tomatoes: 0
+            };
+            const { data, error } = await db.from('profiles').insert(initial).select().single();
+            if (!error && data) prof = data;
+            else prof = initial; // Fallback to initial object if insert fails
         }
-        profile = prof;
+        profile = prof || { id: user.id, username: user.email.split('@')[0], level: 1, exp: 0, total_tomatoes: 0 };
 
         // Sessions
         const { data: sess } = await db.from('tomato_sessions').select('*').eq('user_id', user.id);
