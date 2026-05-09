@@ -504,7 +504,12 @@
     let taskChart, weeklyChart;
 
     async function init() {
-        const { data: { session } } = await db.auth.getSession();
+        // Initialize UI components first
+        initCharts();
+
+        const { data: { session }, error: sessionError } = await db.auth.getSession();
+        if (sessionError) console.error("Session Error:", sessionError);
+
         if (session) {
             user = session.user;
             await loadData();
@@ -512,7 +517,6 @@
         } else {
             showView('auth');
         }
-        initCharts();
         updateUI();
     }
 
@@ -560,18 +564,44 @@
     // --- Data ---
     async function loadData() {
         if (!user) return;
-        let { data: prof } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
-        if (!prof) {
-            const initial = { id: user.id, username: user.user_metadata.username || user.email.split('@')[0], level: 1, exp: 0, total_tomatoes: 0 };
-            const { data } = await db.from('profiles').insert(initial).select().single();
-            prof = data || initial;
+        try {
+            // Profile
+            let { data: prof, error: profErr } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
+
+            if (profErr) {
+                console.error("Profile Load Error:", profErr);
+                // If 404 or similar, likely tables aren't created
+                if (profErr.code === 'PGRST204' || profErr.message.includes('not found') || profErr.status === 404) {
+                    alert("Database Error: Table 'profiles' not found.\n\nHave you executed the SQL script in your Supabase SQL Editor? Please check the instructions.");
+                }
+            }
+
+            if (!prof) {
+                const metadata = user.user_metadata || {};
+                const initial = {
+                    id: user.id,
+                    username: metadata.username || user.email.split('@')[0],
+                    level: 1,
+                    exp: 0,
+                    total_tomatoes: 0
+                };
+                const { data: inserted, error: insErr } = await db.from('profiles').insert(initial).select().single();
+                if (insErr) console.error("Profile Insert Error:", insErr);
+                prof = inserted || initial;
+            }
+            profile = prof;
+
+            // Sessions
+            const { data: sess, error: sessErr } = await db.from('tomato_sessions').select('*').eq('user_id', user.id);
+            if (sessErr) console.error("Sessions Load Error:", sessErr);
+            sessions = sess || [];
+
+            updateUI();
+            updateCharts();
+            refreshLeaderboard();
+        } catch (e) {
+            console.error("Critical Load Error:", e);
         }
-        profile = prof;
-        const { data: sess } = await db.from('tomato_sessions').select('*').eq('user_id', user.id);
-        sessions = sess || [];
-        updateUI();
-        updateCharts();
-        refreshLeaderboard();
     }
 
     // --- Timer ---
@@ -689,19 +719,36 @@
     }
 
     function updateCharts() {
+        if (!taskChart || !weeklyChart) return;
+
         const todayStr = new Date().toLocaleDateString();
-        const todaySessions = sessions.filter(s => new Date(s.completed_at).toLocaleDateString() === todayStr);
-        document.getElementById('stat-today-time').innerText = todaySessions.reduce((acc, s) => acc + s.duration, 0);
-        const taskMap = {}; todaySessions.forEach(s => taskMap[s.task_name] = (taskMap[s.task_name] || 0) + s.duration);
-        taskChart.data.labels = Object.keys(taskMap); taskChart.data.datasets[0].data = Object.values(taskMap);
+        const todaySessions = (sessions || []).filter(s => s && s.completed_at && new Date(s.completed_at).toLocaleDateString() === todayStr);
+
+        const totalMinutes = todaySessions.reduce((acc, s) => acc + (s.duration || 0), 0);
+        const statEl = document.getElementById('stat-today-time');
+        if (statEl) statEl.innerText = totalMinutes;
+
+        const taskMap = {};
+        todaySessions.forEach(s => {
+            const name = s.task_name || 'Hero Mission';
+            taskMap[name] = (taskMap[name] || 0) + (s.duration || 0);
+        });
+
+        taskChart.data.labels = Object.keys(taskMap);
+        taskChart.data.datasets[0].data = Object.values(taskMap);
         taskChart.update();
-        const weeklyData = Array(7).fill(0); const dayLabels = [];
+
+        const weeklyData = Array(7).fill(0);
+        const dayLabels = [];
         for (let i = 6; i >= 0; i--) {
             const d = new Date(); d.setDate(d.getDate() - i);
+            const dStr = d.toLocaleDateString();
             dayLabels.push(d.toLocaleDateString('en-US', { weekday: 'short' }));
-            weeklyData[6-i] = sessions.filter(s => new Date(s.completed_at).toLocaleDateString() === d.toLocaleDateString()).length;
+            weeklyData[6-i] = (sessions || []).filter(s => s && s.completed_at && new Date(s.completed_at).toLocaleDateString() === dStr).length;
         }
-        weeklyChart.data.labels = dayLabels; weeklyChart.data.datasets[0].data = weeklyData; weeklyChart.update();
+        weeklyChart.data.labels = dayLabels;
+        weeklyChart.data.datasets[0].data = weeklyData;
+        weeklyChart.update();
     }
 
     async function refreshLeaderboard() {
