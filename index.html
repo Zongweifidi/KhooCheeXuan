@@ -562,9 +562,12 @@
     }
 
     function showApp() {
-        document.getElementById('auth-view').classList.remove('active');
-        document.getElementById('main-sidebar').classList.remove('hidden');
-        document.getElementById('main-app').classList.remove('hidden');
+        const auth = document.getElementById('auth-view');
+        const sidebar = document.getElementById('main-sidebar');
+        const app = document.getElementById('main-app');
+        if (auth) auth.classList.remove('active');
+        if (sidebar) sidebar.classList.remove('hidden');
+        if (app) app.classList.remove('hidden');
     }
 
     // --- 导航切换 ---
@@ -621,21 +624,42 @@
     async function loadData() {
         if (!user) return;
         try {
-            let { data: prof } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
-            if (!prof) {
-                const initial = { id: user.id, username: user.user_metadata.username || user.email.split('@')[0], level: 1, exp: 0, total_tomatoes: 0 };
-                const { data } = await db.from('profiles').insert(initial).select().single();
-                prof = data || initial;
-            }
-            profile = prof;
+            // Profile
+            let { data: prof, error: profErr } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
 
-            const { data: sess } = await db.from('tomato_sessions').select('*').eq('user_id', user.id);
+            if (profErr) {
+                console.error("Profile Load Error:", profErr);
+                if (profErr.code === 'PGRST204' || profErr.message.includes('not found') || profErr.status === 404) {
+                    alert("数据库表缺失！\n\n请在您的 Supabase SQL Editor 中运行建表脚本，否则数据无法保存。");
+                }
+            }
+
+            if (!prof) {
+                const metadata = user.user_metadata || {};
+                const initial = {
+                    id: user.id,
+                    username: metadata.username || user.email.split('@')[0],
+                    level: 1,
+                    exp: 0,
+                    total_tomatoes: 0
+                };
+                const { data: inserted, error: insErr } = await db.from('profiles').insert(initial).select().single();
+                if (insErr) console.error("Profile Create Error:", insErr);
+                prof = inserted || initial;
+            }
+            profile = prof || profile;
+
+            // Sessions
+            const { data: sess, error: sessErr } = await db.from('tomato_sessions').select('*').eq('user_id', user.id);
+            if (sessErr) console.error("Sessions Load Error:", sessErr);
             sessions = sess || [];
 
             updateUI();
             updateCharts();
             refreshLeaderboard();
-        } catch (e) { console.error(e); }
+        } catch (e) {
+            console.error("Critical Data Error:", e);
+        }
     }
 
     // --- 计时器逻辑 ---
@@ -720,17 +744,27 @@
 
     // --- 界面渲染 ---
     function updateUI() {
-        document.getElementById('display-username').innerText = profile.username;
-        document.getElementById('avatar-container').innerText = profile.username.charAt(0).toUpperCase();
-        document.getElementById('display-title').innerText = getTitle(profile.level);
-        document.getElementById('display-level').innerText = profile.level;
+        const setVal = (id, val) => { const el = document.getElementById(id); if (el) el.innerText = val; };
+
+        setVal('display-username', profile.username || '英雄');
+        const avatar = document.getElementById('avatar-container');
+        if (avatar) avatar.innerText = (profile.username || 'H').charAt(0).toUpperCase();
+
+        setVal('display-title', getTitle(profile.level));
+        setVal('display-level', profile.level);
+
         const currentExp = getExpInLevel(profile.exp, profile.level);
         const nextExp = getRequiredExp(profile.level);
-        document.getElementById('display-exp').innerText = Math.floor(currentExp);
-        document.getElementById('display-next-exp').innerText = Math.floor(nextExp);
-        document.getElementById('exp-fill').style.width = (currentExp / nextExp * 100) + '%';
-        document.getElementById('stat-total-tomatoes').innerText = profile.total_tomatoes;
-        renderRecentTasks(); updateTimerUI();
+        setVal('display-exp', Math.floor(currentExp));
+        setVal('display-next-exp', Math.floor(nextExp));
+
+        const fill = document.getElementById('exp-fill');
+        if (fill) fill.style.width = (currentExp / nextExp * 100) + '%';
+
+        setVal('stat-total-tomatoes', profile.total_tomatoes || 0);
+
+        renderRecentTasks();
+        updateTimerUI();
     }
 
     function updateTimerUI() {
@@ -771,10 +805,15 @@
     function updateCharts() {
         if (!taskChart || !weeklyChart) return;
         const todayStr = new Date().toLocaleDateString();
-        const todaySessions = sessions.filter(s => new Date(s.completed_at).toLocaleDateString() === todayStr);
-        document.getElementById('stat-today-time').innerText = todaySessions.reduce((acc, s) => acc + s.duration, 0);
+        const todaySessions = (sessions || []).filter(s => s && s.completed_at && new Date(s.completed_at).toLocaleDateString() === todayStr);
 
-        const taskMap = {}; todaySessions.forEach(s => taskMap[s.task_name] = (taskMap[s.task_name] || 0) + s.duration);
+        const todayTimeEl = document.getElementById('stat-today-time');
+        if (todayTimeEl) todayTimeEl.innerText = todaySessions.reduce((acc, s) => acc + (s.duration || 0), 0);
+
+        const taskMap = {}; todaySessions.forEach(s => {
+            const name = s.task_name || '未命名任务';
+            taskMap[name] = (taskMap[name] || 0) + (s.duration || 0);
+        });
         taskChart.data.labels = Object.keys(taskMap); taskChart.data.datasets[0].data = Object.values(taskMap);
         taskChart.update();
 
