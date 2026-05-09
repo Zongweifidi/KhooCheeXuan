@@ -610,6 +610,9 @@
         const email = document.getElementById('auth-email').value;
         const password = document.getElementById('auth-password').value;
         const username = document.getElementById('auth-username').value;
+
+        if (!email || !password) return alert("请填入邮箱和密码");
+
         try {
             if (isLogin) {
                 const { data, error } = await db.auth.signInWithPassword({ email, password });
@@ -617,9 +620,16 @@
                 user = data.user;
             } else {
                 const { data, error } = await db.auth.signUp({ email, password, options: { data: { username: username || email.split('@')[0] } } });
-                if (error) throw error;
+                if (error) {
+                    if (error.status === 422) {
+                        alert("注册失败：密码可能太短（需至少6位）或者邮箱格式不正确。");
+                    } else {
+                        throw error;
+                    }
+                    return;
+                }
                 user = data.user;
-                if (!data.session) return alert("账号已创建！请查收邮件或直接登录。");
+                if (!data.session) return alert("账号已创建！请查收邮件验证（如果没收到，请尝试在 Supabase 后台关闭 Email Confirm）。");
             }
             await loadData();
             showApp();
@@ -638,12 +648,12 @@
             // Profile
             let { data: prof, error: profErr } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
 
-            if (profErr) {
-                console.error("Profile Load Error:", profErr);
-                if (profErr.code === 'PGRST204' || profErr.message?.includes('not found') || profErr.status === 404) {
-                    showSetupGuide();
-                    return;
-                }
+            // Check if any error indicates missing tables
+            const isMissingTable = (err) => err && (err.code === 'PGRST204' || err.message?.includes('not found') || err.status === 404);
+
+            if (isMissingTable(profErr)) {
+                showSetupGuide();
+                return;
             }
 
             if (!prof) {
@@ -656,6 +666,12 @@
                     total_tomatoes: 0
                 };
                 const { data: inserted, error: insErr } = await db.from('profiles').insert(initial).select().single();
+
+                if (isMissingTable(insErr)) {
+                    showSetupGuide();
+                    return;
+                }
+
                 if (insErr) {
                     console.error("Profile Create Error:", insErr);
                     prof = initial;
@@ -679,30 +695,41 @@
     }
 
     function showSetupGuide() {
+        if (document.getElementById('setup-overlay')) return;
         const overlay = document.createElement('div');
         overlay.id = 'setup-overlay';
         overlay.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,0.98);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(15px)';
+        const sql = `CREATE TABLE IF NOT EXISTS public.profiles (id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY, username TEXT, level INT DEFAULT 1, exp INT DEFAULT 0, total_tomatoes INT DEFAULT 0, updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());
+CREATE TABLE IF NOT EXISTS public.tomato_sessions (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL, completed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), duration INT, task_name TEXT DEFAULT '专注任务');
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tomato_sessions ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Profiles are public" ON public.profiles FOR SELECT USING (true);
+CREATE POLICY "Users update own profile" ON public.profiles FOR ALL USING (auth.uid() = id);
+CREATE POLICY "Sessions are private" ON public.tomato_sessions FOR ALL USING (auth.uid() = user_id);`;
+
         overlay.innerHTML = `
-            <div class="glass-card" style="max-width:600px;width:100%;text-align:left;padding:32px">
-                <h2 style="color:var(--primary);margin-bottom:16px"><i data-lucide="database"></i> 数据库未就绪</h2>
-                <p style="color:var(--text-muted);margin-bottom:24px;line-height:1.6">我们在您的 Supabase 项目中未找到所需的数据库表。请按照以下步骤完成初始化：</p>
-                <ol style="color:var(--text-main);margin-bottom:24px;padding-left:20px;line-height:2">
-                    <li>打开您的 Supabase Dashboard</li>
-                    <li>点击左侧导航栏的 <b>SQL Editor</b></li>
+            <div class="glass-card" style="max-width:640px;width:100%;text-align:left;padding:32px">
+                <h2 style="color:var(--primary);margin-bottom:16px;display:flex;align-items:center;gap:10px"><i data-lucide="database"></i> 数据库未就绪</h2>
+                <p style="color:var(--text-muted);margin-bottom:20px;line-height:1.6">我们需要在您的 Supabase 中创建 <b>profiles</b> 和 <b>tomato_sessions</b> 表。</p>
+                <ol style="color:var(--text-main);margin-bottom:20px;padding-left:20px;line-height:1.8;font-size:14px">
+                    <li>前往 Supabase 官网 -> 您的项目</li>
+                    <li>点击左侧的 <b>SQL Editor</b> (图标为 >_)</li>
                     <li>点击 <b>+ New query</b></li>
-                    <li>将下方的 SQL 代码粘贴进去并点击 <b>Run</b></li>
+                    <li>复制下方代码粘贴并点击 <b>Run</b></li>
                 </ol>
-                <div style="background:rgba(0,0,0,0.3);padding:15px;border-radius:12px;font-family:monospace;font-size:12px;color:var(--text-muted);overflow-x:auto;max-height:150px;margin-bottom:24px;border:1px solid var(--border)">
-                    CREATE TABLE IF NOT EXISTS public.profiles (id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY, username TEXT, level INT DEFAULT 1, exp INT DEFAULT 0, total_tomatoes INT DEFAULT 0, updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());<br>
-                    CREATE TABLE IF NOT EXISTS public.tomato_sessions (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL, completed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), duration INT, task_name TEXT);<br>
-                    ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;<br>
-                    ALTER TABLE public.tomato_sessions ENABLE ROW LEVEL SECURITY;<br>
-                </div>
-                <button class="btn btn-primary" style="width:100%" onclick="location.reload()">已运行，点此刷新页面</button>
+                <textarea id="sql-code" readonly style="width:100%;height:140px;background:rgba(0,0,0,0.3);padding:15px;border-radius:12px;font-family:monospace;font-size:11px;color:#a5b4fc;margin-bottom:15px;border:1px solid var(--border);resize:none;outline:none">${sql}</textarea>
+                <button class="btn btn-outline" style="width:100%;margin-bottom:12px" onclick="copySQL()">复制 SQL 代码</button>
+                <button class="btn btn-primary" style="width:100%" onclick="location.reload()">我已运行，刷新进入竞技场</button>
             </div>
         `;
         document.body.appendChild(overlay);
         lucide.createIcons();
+        window.copySQL = () => {
+            const area = document.getElementById('sql-code');
+            area.select();
+            document.execCommand('copy');
+            alert('SQL 已复制到剪贴板！');
+        };
     }
 
     // --- 计时器逻辑 ---
