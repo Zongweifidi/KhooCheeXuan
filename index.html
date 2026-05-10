@@ -329,8 +329,16 @@
                 const { data, error } = await db.auth.signInWithPassword({ email, password });
                 if (error) throw error; user = data.user;
             } else {
-                const { data, error } = await db.auth.signUp({ email, password, options: { data: { username: username || email.split('@')[0] } } });
-                if (error) { if(error.status===422) alert("密码需至少6位"); else throw error; return; }
+                const { data, error } = await db.auth.signUp({
+                    email,
+                    password,
+                    options: { data: { username: username || email.split('@')[0] } }
+                });
+                if (error) {
+                    console.error("Auth Signup Detailed Error:", error);
+                    alert("注册失败：" + error.message + " (错误码: " + (error.status || '422') + ")");
+                    return;
+                }
                 user = data.user; if (!data.session) return alert("账号已创建，请查收邮件或直接尝试登录");
             }
             await loadData(); showApp();
@@ -346,7 +354,11 @@
         if (!user) return;
         try {
             let { data: prof, error: profErr } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
-            if (profErr && profErr.status === 404) return showSetupGuide();
+
+            // 更智能的表缺失检测
+            const isTableMissing = (err) => err && (err.status === 404 || err.code === 'PGRST204' || err.message?.includes('not found'));
+
+            if (isTableMissing(profErr)) return showSetupGuide();
             if (!prof) {
                 const initProf = { id: user.id, username: user.user_metadata.username || user.email.split('@')[0], level: 1, exp: 0, total_tomatoes: 0 };
                 const { data } = await db.from('profiles').insert(initProf).select().single();
@@ -363,20 +375,54 @@
         if (document.getElementById('setup-overlay')) return;
         const div = document.createElement('div'); div.id = 'setup-overlay';
         div.style.cssText = 'position:fixed;inset:0;background:rgba(2,6,23,0.98);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(15px)';
-        const sql = `CREATE TABLE IF NOT EXISTS public.profiles (id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY, username TEXT, level INT DEFAULT 1, exp INT DEFAULT 0, total_tomatoes INT DEFAULT 0, updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW());
-CREATE TABLE IF NOT EXISTS public.tomato_sessions (id UUID DEFAULT gen_random_uuid() PRIMARY KEY, user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL, completed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(), duration INT, task_name TEXT DEFAULT '专注任务');
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY; ALTER TABLE public.tomato_sessions ENABLE ROW LEVEL SECURITY;
+        const sql = `-- 1. 彻底重建表与权限（复制此段运行）
+DROP TABLE IF EXISTS public.tomato_sessions;
+DROP TABLE IF EXISTS public.profiles;
+
+CREATE TABLE public.profiles (
+  id UUID REFERENCES auth.users ON DELETE CASCADE PRIMARY KEY,
+  username TEXT,
+  level INT DEFAULT 1,
+  exp INT DEFAULT 0,
+  total_tomatoes INT DEFAULT 0,
+  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+CREATE TABLE public.tomato_sessions (
+  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
+  user_id UUID REFERENCES public.profiles(id) ON DELETE CASCADE NOT NULL,
+  completed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+  duration INT,
+  task_name TEXT DEFAULT '专注任务'
+);
+
+ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.tomato_sessions ENABLE ROW LEVEL SECURITY;
+
 CREATE POLICY "Profiles public" ON public.profiles FOR SELECT USING (true);
 CREATE POLICY "Profile update" ON public.profiles FOR ALL USING (auth.uid() = id);
 CREATE POLICY "Session privacy" ON public.tomato_sessions FOR ALL USING (auth.uid() = user_id);
-GRANT ALL ON public.profiles TO anon, authenticated, service_role; GRANT ALL ON public.tomato_sessions TO anon, authenticated, service_role;`;
-        div.innerHTML = `<div class="glass-card" style="max-width:600px; text-align:left;">
-            <h2 style="color:var(--primary); margin-bottom:15px;">数据库未就绪</h2>
-            <p style="color:var(--text-muted); margin-bottom:15px;">请在 Supabase SQL Editor 运行以下代码：</p>
-            <textarea readonly style="width:100%; height:150px; background:#000; color:#0f0; font-family:monospace; padding:10px; margin-bottom:15px;">${sql}</textarea>
-            <button class="btn btn-primary" style="width:100%" onclick="location.reload()">已运行，刷新重连</button>
+
+GRANT ALL ON public.profiles TO anon, authenticated, service_role;
+GRANT ALL ON public.tomato_sessions TO anon, authenticated, service_role;
+
+NOTIFY pgrst, 'reload schema';`;
+
+        div.innerHTML = `<div class="glass-card" style="max-width:600px; text-align:left; padding:32px;">
+            <h2 style="color:var(--primary); margin-bottom:15px; display:flex; align-items:center; gap:10px;"><i data-lucide="database"></i> 数据库通信异常</h2>
+            <p style="color:var(--text-muted); margin-bottom:15px; line-height:1.6;">即使表已建立，API 可能因缓存或权限未同步而返回 404。请在 <b>SQL Editor</b> 中运行以下修复脚本：</p>
+            <textarea id="sql-code" readonly style="width:100%; height:180px; background:#000; color:#4ade80; font-family:monospace; padding:15px; margin-bottom:15px; border-radius:12px; border:1px solid var(--border); font-size:11px;">${sql}</textarea>
+            <button class="btn btn-outline" style="width:100%; margin-bottom:10px;" onclick="copySQL()">复制修复脚本</button>
+            <button class="btn btn-primary" style="width:100%" onclick="location.reload()">我已运行，刷新重连</button>
         </div>`;
         document.body.appendChild(div);
+        lucide.createIcons();
+        window.copySQL = () => {
+            const area = document.getElementById('sql-code');
+            area.select();
+            document.execCommand('copy');
+            alert('SQL 已复制！请在 Supabase SQL Editor 运行。');
+        };
     }
 
     const slider = document.getElementById('timer-slider');
