@@ -320,14 +320,24 @@
     };
 
     document.getElementById('auth-submit').onclick = async () => {
+        const btn = document.getElementById('auth-submit');
         const email = document.getElementById('auth-email').value;
         const password = document.getElementById('auth-password').value;
         const username = document.getElementById('auth-username').value;
-        if (!email || !password) return alert("请填写信息");
+
+        if (!email || !password) return alert("请填写完整的邮箱和密码");
+
+        // UI 状态反馈
+        const originalText = btn.innerText;
+        btn.innerText = "正在验证身份...";
+        btn.disabled = true;
+        btn.style.opacity = "0.7";
+
         try {
             if (isLogin) {
                 const { data, error } = await db.auth.signInWithPassword({ email, password });
-                if (error) throw error; user = data.user;
+                if (error) throw error;
+                user = data.user;
             } else {
                 const { data, error } = await db.auth.signUp({
                     email,
@@ -335,14 +345,32 @@
                     options: { data: { username: username || email.split('@')[0] } }
                 });
                 if (error) {
-                    console.error("Auth Signup Detailed Error:", error);
-                    alert("注册失败：" + error.message + " (错误码: " + (error.status || '422') + ")");
+                    console.error("Signup Error:", error);
+                    alert("注册失败：" + error.message);
                     return;
                 }
-                user = data.user; if (!data.session) return alert("账号已创建，请查收邮件或直接尝试登录");
+                user = data.user;
+                if (!data.session) {
+                    alert("账号已创建，请查收确认邮件。若没收到，请确保 Supabase 中已关闭 Email Confirm 选项。");
+                    return;
+                }
             }
-            await loadData(); showApp();
-        } catch (e) { alert("认证失败: " + e.message); }
+
+            // 重要：先加载数据，确认数据库正常
+            console.log("认证成功，正在同步云端数据...");
+            const dataLoaded = await loadData();
+
+            if (dataLoaded !== false) {
+                showApp();
+            }
+        } catch (e) {
+            console.error("Auth Failure:", e);
+            alert("认证失败：" + e.message + "\n\n提示：请检查网络连接及 Supabase 凭据是否正确。");
+        } finally {
+            btn.innerText = originalText;
+            btn.disabled = false;
+            btn.style.opacity = "1";
+        }
     };
 
     const logoutBtn = document.getElementById('logout-btn');
@@ -351,24 +379,39 @@
     }
 
     async function loadData() {
-        if (!user) return;
+        if (!user) return false;
         try {
             let { data: prof, error: profErr } = await db.from('profiles').select('*').eq('id', user.id).maybeSingle();
 
             // 更智能的表缺失检测
             const isTableMissing = (err) => err && (err.status === 404 || err.code === 'PGRST204' || err.message?.includes('not found'));
 
-            if (isTableMissing(profErr)) return showSetupGuide();
+            if (isTableMissing(profErr)) {
+                showSetupGuide();
+                return false;
+            }
             if (!prof) {
                 const initProf = { id: user.id, username: user.user_metadata.username || user.email.split('@')[0], level: 1, exp: 0, total_tomatoes: 0 };
                 const { data } = await db.from('profiles').insert(initProf).select().single();
                 prof = data || initProf;
             }
             profile = prof;
-            const { data: sess } = await db.from('tomato_sessions').select('*').eq('user_id', user.id);
+            const { data: sess, error: sessErr } = await db.from('tomato_sessions').select('*').eq('user_id', user.id);
+
+            if (isTableMissing(sessErr)) {
+                showSetupGuide();
+                return false;
+            }
+
             sessions = sess || [];
-            updateUI(); updateCharts(); refreshLeaderboard();
-        } catch (e) { console.error(e); }
+            updateUI();
+            updateCharts();
+            refreshLeaderboard();
+            return true;
+        } catch (e) {
+            console.error("Load Data Exception:", e);
+            return false;
+        }
     }
 
     function showSetupGuide() {
